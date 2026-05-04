@@ -3,7 +3,8 @@ from datetime import UTC, datetime, timedelta
 from fastapi.testclient import TestClient
 
 from tradingagents.api.app import app
-from tradingagents.domain.schemas import AnalyzeRequest, ForexSignalRequest, SignalDirection
+from tradingagents.agents import MarketStructureAgent
+from tradingagents.domain.schemas import AnalyzeRequest, Candle, ForexSignalRequest, SignalDirection
 from tradingagents.graph import ForexSignalGraph
 
 
@@ -87,3 +88,59 @@ def test_analyze_graph_uses_dummy_data_when_ohlc_missing() -> None:
     assert signal.symbol == "EURUSD"
     assert signal.direction in SignalDirection
     assert signal.entry > 0
+
+
+def test_market_structure_detects_bullish_bos() -> None:
+    candles = [
+        Candle(timestamp=datetime(2026, 1, 1, hour=i, tzinfo=UTC), open=o, high=h, low=l, close=c)
+        for i, (o, h, l, c) in enumerate(
+            [
+                (1.1000, 1.1010, 1.0990, 1.1005),
+                (1.1005, 1.1030, 1.1000, 1.1020),
+                (1.1020, 1.1040, 1.1010, 1.1030),
+                (1.1030, 1.1020, 1.0990, 1.1000),
+                (1.1000, 1.1010, 1.0970, 1.0980),
+                (1.0980, 1.1000, 1.0960, 1.0990),
+                (1.0990, 1.1020, 1.0980, 1.1010),
+                (1.1010, 1.1050, 1.1000, 1.1045),
+                (1.1045, 1.1060, 1.1030, 1.1055),
+            ]
+        )
+    ]
+
+    report = MarketStructureAgent().analyze(candles)
+
+    assert report.bias.value == "bullish"
+    assert report.structure == "BOS"
+    assert report.liquidity_sweep is False
+    assert report.key_levels
+    assert report.order_blocks
+
+
+def test_market_structure_detects_choch_and_liquidity_sweep() -> None:
+    candles = [
+        Candle(timestamp=datetime(2026, 1, 2, hour=i, tzinfo=UTC), open=o, high=h, low=l, close=c)
+        for i, (o, h, l, c) in enumerate(
+            [
+                (1.1000, 1.1010, 1.0990, 1.1005),
+                (1.1005, 1.1030, 1.1000, 1.1020),
+                (1.1020, 1.1040, 1.1010, 1.1030),
+                (1.1030, 1.1020, 1.0990, 1.1000),
+                (1.1000, 1.1010, 1.0970, 1.0980),
+                (1.0980, 1.1000, 1.0960, 1.0990),
+                (1.0990, 1.1020, 1.0980, 1.1010),
+                (1.1010, 1.1050, 1.1000, 1.1045),
+                (1.1045, 1.1060, 1.1030, 1.1055),
+                (1.1055, 1.1070, 1.1040, 1.1045),
+                (1.1045, 1.1050, 1.0955, 1.0980),
+                (1.0980, 1.0990, 1.0940, 1.0950),
+            ]
+        )
+    ]
+
+    report = MarketStructureAgent().analyze(candles)
+
+    assert report.bias.value == "bearish"
+    assert report.structure == "CHoCH"
+    assert report.liquidity_sweep is True
+    assert report.key_levels

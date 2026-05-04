@@ -136,6 +136,9 @@ class FairValueGap(BaseModel):
 
 class MarketStructureReport(BaseModel):
     bias: MarketBias
+    structure: Literal["BOS", "CHoCH", "range"]
+    liquidity_sweep: bool
+    key_levels: list[float]
     latest_close: float
     swing_highs: list[SwingPoint]
     swing_lows: list[SwingPoint]

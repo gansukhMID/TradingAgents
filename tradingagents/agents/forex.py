@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from collections import Counter
-
 from tradingagents.domain.schemas import (
     AnalyzeRequest,
     Candle,
@@ -33,17 +31,30 @@ class MarketStructureAgent:
         breaks = self._find_breaks(candles, swing_highs, swing_lows)
         order_blocks = self._find_order_blocks(candles, breaks)
         fair_value_gaps = self._find_fair_value_gaps(candles)
+        liquidity_sweep = self._has_liquidity_sweep(candles, swing_highs, swing_lows)
         bias = self._derive_bias(candles, breaks, swing_highs, swing_lows)
+        structure = self._derive_structure(breaks)
+        key_levels = self._key_levels(swing_highs, swing_lows, order_blocks)
 
         return MarketStructureReport(
             bias=bias,
+            structure=structure,
+            liquidity_sweep=liquidity_sweep,
+            key_levels=key_levels,
             latest_close=candles[-1].close,
             swing_highs=swing_highs[-12:],
             swing_lows=swing_lows[-12:],
             breaks=breaks[-8:],
             order_blocks=order_blocks[-6:],
             fair_value_gaps=fair_value_gaps[-8:],
-            narrative=self._narrative(bias, breaks, order_blocks, fair_value_gaps),
+            narrative=self._narrative(
+                bias,
+                structure,
+                liquidity_sweep,
+                breaks,
+                order_blocks,
+                fair_value_gaps,
+            ),
         )
 
     def _find_swings(self, candles: list[Candle], width: int = 2) -> tuple[list[SwingPoint], list[SwingPoint]]:
@@ -69,31 +80,36 @@ class MarketStructureAgent:
         swing_lows: list[SwingPoint],
     ) -> list[StructureBreak]:
         breaks: list[StructureBreak] = []
+        trend: MarketBias | None = None
         for index, candle in enumerate(candles):
             prior_highs = [swing for swing in swing_highs if swing.index < index]
             prior_lows = [swing for swing in swing_lows if swing.index < index]
             if prior_highs and candle.close > prior_highs[-1].price:
+                kind = "bos" if trend in (None, MarketBias.BULLISH) else "choch"
                 breaks.append(
                     StructureBreak(
                         index=index,
                         timestamp=candle.timestamp,
                         price=candle.close,
-                        kind="bos" if not breaks or breaks[-1].direction == MarketBias.BULLISH else "choch",
+                        kind=kind,
                         direction=MarketBias.BULLISH,
                         reference_price=prior_highs[-1].price,
                     )
                 )
+                trend = MarketBias.BULLISH
             if prior_lows and candle.close < prior_lows[-1].price:
+                kind = "bos" if trend in (None, MarketBias.BEARISH) else "choch"
                 breaks.append(
                     StructureBreak(
                         index=index,
                         timestamp=candle.timestamp,
                         price=candle.close,
-                        kind="bos" if not breaks or breaks[-1].direction == MarketBias.BEARISH else "choch",
+                        kind=kind,
                         direction=MarketBias.BEARISH,
                         reference_price=prior_lows[-1].price,
                     )
                 )
+                trend = MarketBias.BEARISH
         return breaks
 
     def _find_order_blocks(
@@ -167,12 +183,7 @@ class MarketStructureAgent:
         swing_lows: list[SwingPoint],
     ) -> MarketBias:
         if breaks:
-            recent = breaks[-3:]
-            counts = Counter(item.direction for item in recent)
-            if counts[MarketBias.BULLISH] > counts[MarketBias.BEARISH]:
-                return MarketBias.BULLISH
-            if counts[MarketBias.BEARISH] > counts[MarketBias.BULLISH]:
-                return MarketBias.BEARISH
+            return breaks[-1].direction
         if len(swing_highs) >= 2 and len(swing_lows) >= 2:
             higher_high = swing_highs[-1].price > swing_highs[-2].price
             higher_low = swing_lows[-1].price > swing_lows[-2].price
@@ -188,17 +199,61 @@ class MarketStructureAgent:
             return MarketBias.BEARISH
         return MarketBias.NEUTRAL
 
+    def _derive_structure(self, breaks: list[StructureBreak]) -> str:
+        if not breaks:
+            return "range"
+        return "CHoCH" if breaks[-1].kind == "choch" else "BOS"
+
+    def _has_liquidity_sweep(
+        self,
+        candles: list[Candle],
+        swing_highs: list[SwingPoint],
+        swing_lows: list[SwingPoint],
+    ) -> bool:
+        for index, candle in enumerate(candles):
+            prior_highs = [swing for swing in swing_highs if swing.index < index]
+            prior_lows = [swing for swing in swing_lows if swing.index < index]
+            swept_buy_side = (
+                bool(prior_highs)
+                and candle.high > prior_highs[-1].price
+                and candle.close < prior_highs[-1].price
+            )
+            swept_sell_side = (
+                bool(prior_lows)
+                and candle.low < prior_lows[-1].price
+                and candle.close > prior_lows[-1].price
+            )
+            if swept_buy_side or swept_sell_side:
+                return True
+        return False
+
+    def _key_levels(
+        self,
+        swing_highs: list[SwingPoint],
+        swing_lows: list[SwingPoint],
+        order_blocks: list[OrderBlock],
+    ) -> list[float]:
+        levels: list[float] = []
+        levels.extend(swing.price for swing in swing_highs[-3:])
+        levels.extend(swing.price for swing in swing_lows[-3:])
+        for block in order_blocks[-2:]:
+            levels.extend([block.high, block.low])
+        deduped = sorted({round(level, 5) for level in levels})
+        return deduped[-10:]
+
     def _narrative(
         self,
         bias: MarketBias,
+        structure: str,
+        liquidity_sweep: bool,
         breaks: list[StructureBreak],
         order_blocks: list[OrderBlock],
         gaps: list[FairValueGap],
     ) -> str:
         return (
-            f"Market structure bias is {bias.value}. "
+            f"Market structure bias is {bias.value} with {structure}. "
             f"Detected {len(breaks)} structure breaks, {len(order_blocks)} order blocks, "
-            f"and {len(gaps)} fair value gaps in the analysis window."
+            f"{len(gaps)} fair value gaps, and liquidity sweep={liquidity_sweep}."
         )
 
 
