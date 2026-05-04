@@ -32,7 +32,7 @@ class ForexDataService:
 
     Production deployments should swap this adapter for a broker or market-data
     provider. The deterministic fallback keeps the API runnable in local and CI
-    environments without stock-specific yfinance dependencies.
+    environments without external market-data credentials.
     """
 
     def get_candles(self, pair: str, timeframe: Timeframe, lookback: int) -> list[Candle]:
