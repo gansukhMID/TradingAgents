@@ -3,43 +3,30 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tradingagents"
-version = "0.2.4"
-description = "TradingAgents: Multi-Agents LLM Financial Trading Framework"
+name = "forex-ai-signal-engine"
+version = "1.0.0"
+description = "Forex AI multi-agent signal engine for ICT/SMC trading"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "langchain-core>=0.3.81",
-    "backtrader>=1.9.78.123",
-    "langchain-anthropic>=0.3.15",
-    "langchain-experimental>=0.3.4",
-    "langchain-google-genai>=4.0.0",
-    "langchain-openai>=0.3.23",
+    "fastapi>=0.115.0",
     "langgraph>=0.4.8",
-    "langgraph-checkpoint-sqlite>=2.0.0",
-    "pandas>=2.3.0",
-    "parsel>=1.10.0",
-    "pytz>=2025.2",
-    "questionary>=2.1.0",
-    "redis>=6.2.0",
-    "requests>=2.32.4",
-    "rich>=14.0.0",
-    "typer>=0.21.0",
+    "pydantic>=2.11.0",
     "setuptools>=80.9.0",
-    "stockstats>=0.6.5",
-    "tqdm>=4.67.1",
     "typing-extensions>=4.14.0",
-    "yfinance>=0.2.63",
+    "uvicorn[standard]>=0.34.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.3",
 ]
 
 [project.scripts]
-tradingagents = "cli.main:app"
+forex-signal-engine = "tradingagents.api.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["tradingagents*", "cli*"]
-
-[tool.setuptools.package-data]
-cli = ["static/*"]
+include = ["tradingagents*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
