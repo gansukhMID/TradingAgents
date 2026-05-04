@@ -1,4 +1,6 @@
 from datetime import UTC, datetime, timedelta
+import sys
+import types
 
 from fastapi.testclient import TestClient
 
@@ -6,6 +8,7 @@ from tradingagents.api.app import app
 from tradingagents.agents import MarketStructureAgent
 from tradingagents.domain.schemas import AnalyzeRequest, Candle, ForexSignalRequest, SignalDirection
 from tradingagents.graph import ForexSignalGraph
+from tradingagents.services.data import ForexDataService
 
 
 def _candles(count: int = 80) -> list[dict]:
@@ -88,6 +91,60 @@ def test_analyze_graph_uses_dummy_data_when_ohlc_missing() -> None:
     assert signal.symbol == "EURUSD"
     assert signal.direction in SignalDirection
     assert signal.entry > 0
+
+
+def test_data_service_fetches_mt5_candles(monkeypatch) -> None:
+    class FakeMT5(types.SimpleNamespace):
+        TIMEFRAME_M15 = 15
+
+        def initialize(self) -> bool:
+            return True
+
+        def copy_rates_from_pos(self, symbol: str, timeframe: int, start_pos: int, count: int) -> list[dict]:
+            assert symbol == "EURUSD"
+            assert timeframe == self.TIMEFRAME_M15
+            assert start_pos == 0
+            assert count == 200
+            return [
+                {
+                    "time": int(datetime(2026, 1, 1, tzinfo=UTC).timestamp()) + index * 900,
+                    "open": 1.0800 + index * 0.0001,
+                    "high": 1.0810 + index * 0.0001,
+                    "low": 1.0790 + index * 0.0001,
+                    "close": 1.0805 + index * 0.0001,
+                    "tick_volume": 100 + index,
+                }
+                for index in range(count)
+            ]
+
+        def shutdown(self) -> None:
+            return None
+
+    monkeypatch.setitem(sys.modules, "MetaTrader5", FakeMT5())
+
+    candles = ForexDataService().get_candles("EURUSD", AnalyzeRequest().timeframe, 200)
+
+    assert len(candles) == 200
+    assert candles[0].open == 1.08
+    assert candles[-1].volume == 299
+
+
+def test_data_service_falls_back_to_mock_when_mt5_fails(monkeypatch) -> None:
+    class FailingMT5(types.SimpleNamespace):
+        TIMEFRAME_M15 = 15
+
+        def initialize(self) -> bool:
+            return False
+
+        def last_error(self) -> tuple[int, str]:
+            return 1, "terminal unavailable"
+
+    monkeypatch.setitem(sys.modules, "MetaTrader5", FailingMT5())
+
+    candles = ForexDataService().get_candles("EURUSD", AnalyzeRequest().timeframe, 200)
+
+    assert len(candles) == 200
+    assert all(candle.close > 0 for candle in candles)
 
 
 def test_market_structure_detects_bullish_bos() -> None:

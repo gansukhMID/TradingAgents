@@ -75,12 +75,12 @@ class ForexSignalRequest(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     symbol: str = Field(default="EURUSD", examples=["EURUSD"])
-    timeframe: Timeframe = Timeframe.H1
+    timeframe: Timeframe = Timeframe.M15
     ohlc: list[Candle] | None = Field(
         default=None,
         description="Optional OHLCV candles. Dummy EURUSD-style candles are generated when omitted.",
     )
-    lookback: int = Field(default=80, ge=30, le=1000)
+    lookback: int = Field(default=200, ge=30, le=1000)
     account_equity: float = Field(default=10_000.0, gt=0)
     risk_per_trade: float = Field(default=0.01, gt=0, le=0.05)
     min_rr: float = Field(default=2.0, ge=1.0, le=10.0)

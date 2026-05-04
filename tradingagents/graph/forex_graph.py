@@ -131,7 +131,12 @@ class ForexSignalGraph:
             request.timeframe,
             request.lookback,
         )
-        return {"candles": candles[-request.lookback :]}
+        return {
+            "candles": candles[-request.lookback :],
+            "analyze_request": request.model_copy(
+                update={"lookback": min(request.lookback, len(candles))}
+            ),
+        }
 
     def _market_structure(self, state: ForexGraphState) -> dict[str, Any]:
         return {"market_structure": self.market_structure_agent.analyze(state["candles"])}

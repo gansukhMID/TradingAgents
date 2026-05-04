@@ -21,6 +21,9 @@ dependencies = [
 dev = [
     "pytest>=9.0.3",
 ]
+mt5 = [
+    "MetaTrader5>=5.0.5200",
+]
 
 [project.scripts]
 forex-signal-engine = "tradingagents.api.cli:main"
