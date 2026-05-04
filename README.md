@@ -12,9 +12,9 @@ pipeline that returns structured Pydantic JSON.
 The repository keeps the original multi-agent graph pattern and refactors it for
 Forex:
 
-1. **Data adapter** (`tradingagents.services.data`) loads OHLCV candles. The
-   included deterministic fallback makes the backend runnable without stock
-   vendors.
+1. **Data adapter** (`tradingagents.services.data`) loads OHLCV candles from a
+   local MetaTrader 5 terminal first, then falls back to deterministic candles
+   when MT5 is unavailable.
 2. **Market Structure Agent** detects ICT/SMC swing highs/lows, BOS/CHOCH,
    order blocks, and fair value gaps.
 3. **Liquidity Agent** identifies equal highs/lows, buy-side liquidity,
@@ -41,15 +41,18 @@ Request:
 ```json
 {
   "symbol": "EURUSD",
+  "timeframe": "15m",
   "account_equity": 10000,
   "risk_per_trade": 0.01,
   "min_rr": 2.0,
-  "lookback": 80
+  "lookback": 200
 }
 ```
 
 You may also pass an `ohlc` array with at least 30 candles. If candles are
-omitted, the service uses bundled dummy Forex data so the full agent pipeline is
+omitted, the service requests the last 200 EURUSD M15 candles through the
+`MetaTrader5` Python package. Connection/import/fetch errors are handled and the
+service falls back to bundled dummy Forex data so the full agent pipeline remains
 runnable locally.
 
 Response includes:
