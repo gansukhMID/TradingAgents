@@ -1,3 +1,3 @@
-from .data import CandleProvider, SyntheticCandleProvider
+from .data import ForexDataService
 
-__all__ = ["CandleProvider", "SyntheticCandleProvider"]
+__all__ = ["ForexDataService"]

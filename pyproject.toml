@@ -17,6 +17,11 @@ dependencies = [
     "uvicorn[standard]>=0.34.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.3",
+]
+
 [project.scripts]
 forex-signal-engine = "tradingagents.api.cli:main"
 
