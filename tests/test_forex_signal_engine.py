@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi.testclient import TestClient
 
 from tradingagents.api.app import app
-from tradingagents.domain.schemas import ForexSignalRequest, SignalDirection
+from tradingagents.domain.schemas import AnalyzeRequest, ForexSignalRequest, SignalDirection
 from tradingagents.graph import ForexSignalGraph
 
 
@@ -57,3 +57,33 @@ def test_signal_endpoint_accepts_candles() -> None:
     assert payload["pair"] == "GBPUSD"
     assert payload["market_structure"]["latest_close"] > 0
     assert payload["technicals"]["indicators"]["atr"] >= 0
+
+
+def test_analyze_endpoint_returns_execution_json() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/analyze",
+        json={
+            "symbol": "EURUSD",
+            "ohlc": _candles(),
+            "account_equity": 10_000,
+            "risk_per_trade": 0.01,
+            "min_rr": 2.0,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload) == {"symbol", "direction", "confidence", "entry", "sl", "tp", "lot_size"}
+    assert payload["symbol"] == "EURUSD"
+    assert payload["direction"] in {"BUY", "SELL", "HOLD"}
+    assert 0 <= payload["confidence"] <= 1
+    assert payload["entry"] > 0
+
+
+def test_analyze_graph_uses_dummy_data_when_ohlc_missing() -> None:
+    signal = ForexSignalGraph().analyze_execution(AnalyzeRequest(symbol="EURUSD"))
+
+    assert signal.symbol == "EURUSD"
+    assert signal.direction in SignalDirection
+    assert signal.entry > 0

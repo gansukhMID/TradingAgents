@@ -1,5 +1,8 @@
 from tradingagents.domain.schemas import (
+    AnalyzeRequest,
     Candle,
+    DebateReport,
+    ExecutionSignal,
     FairValueGap,
     ForexSignal,
     ForexSignalRequest,
@@ -11,6 +14,7 @@ from tradingagents.domain.schemas import (
     MarketStructureReport,
     OrderBlock,
     RiskPlan,
+    SentimentReport,
     SignalDirection,
     StructureBreak,
     SwingPoint,
@@ -19,7 +23,10 @@ from tradingagents.domain.schemas import (
 )
 
 __all__ = [
+    "AnalyzeRequest",
     "Candle",
+    "DebateReport",
+    "ExecutionSignal",
     "FairValueGap",
     "ForexSignal",
     "ForexSignalRequest",
@@ -31,6 +38,7 @@ __all__ = [
     "MarketStructureReport",
     "OrderBlock",
     "RiskPlan",
+    "SentimentReport",
     "SignalDirection",
     "StructureBreak",
     "SwingPoint",

@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from tradingagents.domain.schemas import ForexSignal, ForexSignalRequest, HealthResponse
+from tradingagents.domain.schemas import (
+    AnalyzeRequest,
+    ExecutionSignal,
+    ForexSignal,
+    ForexSignalRequest,
+    HealthResponse,
+)
 from tradingagents.graph import ForexSignalGraph
 
 
@@ -21,6 +27,10 @@ def create_app() -> FastAPI:
     @app.post("/signals", response_model=ForexSignal)
     def create_signal(request: ForexSignalRequest) -> ForexSignal:
         return graph.analyze(request)
+
+    @app.post("/analyze", response_model=ExecutionSignal)
+    def analyze(request: AnalyzeRequest) -> ExecutionSignal:
+        return graph.analyze_execution(request)
 
     return app
 

@@ -3,7 +3,10 @@ from __future__ import annotations
 from collections import Counter
 
 from tradingagents.domain.schemas import (
+    AnalyzeRequest,
     Candle,
+    DebateReport,
+    ExecutionSignal,
     FairValueGap,
     ForexSignal,
     ForexSignalRequest,
@@ -13,6 +16,7 @@ from tradingagents.domain.schemas import (
     MarketStructureReport,
     OrderBlock,
     RiskPlan,
+    SentimentReport,
     SignalDirection,
     StructureBreak,
     SwingPoint,
@@ -295,7 +299,7 @@ class LiquidityAgent:
         return zones
 
 
-class TechnicalAnalysisAgent:
+class TechnicalAgent:
     def analyze(self, candles: list[Candle]) -> TechnicalReport:
         indicators = calculate_indicator_snapshot(candles)
         recent = candles[-30:]
@@ -312,14 +316,107 @@ class TechnicalAnalysisAgent:
         )
 
 
-class RiskManagementAgent:
+TechnicalAnalysisAgent = TechnicalAgent
+
+
+class SentimentAgent:
+    """Deterministic macro/session sentiment proxy for runnable local analysis."""
+
+    def analyze(self, request: AnalyzeRequest, structure: MarketStructureReport, technicals: TechnicalReport) -> SentimentReport:
+        score = 0.0
+        drivers: list[str] = []
+
+        if structure.bias == MarketBias.BULLISH:
+            score += 0.25
+            drivers.append("market structure is bullish")
+        elif structure.bias == MarketBias.BEARISH:
+            score -= 0.25
+            drivers.append("market structure is bearish")
+
+        if technicals.indicators.momentum_bias == MarketBias.BULLISH:
+            score += 0.2
+            drivers.append("momentum confirms upside")
+        elif technicals.indicators.momentum_bias == MarketBias.BEARISH:
+            score -= 0.2
+            drivers.append("momentum confirms downside")
+
+        symbol_factor = (sum(ord(char) for char in request.symbol) % 9 - 4) / 100
+        score += symbol_factor
+        drivers.append("mock macro sentiment is neutral-to-directional from symbol seed")
+        score = max(-1.0, min(1.0, score))
+
+        if score > 0.15:
+            bias = MarketBias.BULLISH
+        elif score < -0.15:
+            bias = MarketBias.BEARISH
+        else:
+            bias = MarketBias.NEUTRAL
+
+        return SentimentReport(
+            bias=bias,
+            score=round(score, 4),
+            drivers=drivers,
+            narrative=f"Sentiment bias is {bias.value} with score {score:.2f}.",
+        )
+
+
+class DebateAgent:
+    def analyze(
+        self,
+        structure: MarketStructureReport,
+        technicals: TechnicalReport,
+        sentiment: SentimentReport,
+    ) -> DebateReport:
+        votes = [structure.bias, technicals.indicators.trend_bias, technicals.indicators.momentum_bias, sentiment.bias]
+        bullish_votes = votes.count(MarketBias.BULLISH)
+        bearish_votes = votes.count(MarketBias.BEARISH)
+
+        if bullish_votes > bearish_votes and bullish_votes >= 2:
+            direction = SignalDirection.BUY
+            bias = MarketBias.BULLISH
+            confidence = bullish_votes / len(votes)
+        elif bearish_votes > bullish_votes and bearish_votes >= 2:
+            direction = SignalDirection.SELL
+            bias = MarketBias.BEARISH
+            confidence = bearish_votes / len(votes)
+        else:
+            direction = SignalDirection.HOLD
+            bias = MarketBias.NEUTRAL
+            confidence = 0.5
+
+        bull_case = [
+            "Bullish structure supports longs." if structure.bias == MarketBias.BULLISH else "No bullish structure edge.",
+            "Technical momentum supports longs." if technicals.indicators.momentum_bias == MarketBias.BULLISH else "Momentum is not bullish.",
+        ]
+        bear_case = [
+            "Bearish structure supports shorts." if structure.bias == MarketBias.BEARISH else "No bearish structure edge.",
+            "Technical momentum supports shorts." if technicals.indicators.momentum_bias == MarketBias.BEARISH else "Momentum is not bearish.",
+        ]
+
+        bullish_score = bullish_votes / len(votes)
+        bearish_score = bearish_votes / len(votes)
+        return DebateReport(
+            direction=direction,
+            confidence=round(confidence, 4),
+            bias=bias,
+            bullish_score=round(bullish_score, 4),
+            bearish_score=round(bearish_score, 4),
+            rationale=[
+                *bull_case,
+                *bear_case,
+                f"Debate selected {direction.value} with {confidence:.0%} agent confluence.",
+            ],
+        )
+
+
+class RiskManagerAgent:
     def plan(
         self,
-        request: ForexSignalRequest,
+        request: ForexSignalRequest | AnalyzeRequest,
         direction: SignalDirection,
         candles: list[Candle],
         technicals: TechnicalReport,
-        liquidity: LiquidityReport,
+        liquidity: LiquidityReport | None = None,
     ) -> RiskPlan | None:
         if direction == SignalDirection.HOLD:
             return None
@@ -327,17 +424,20 @@ class RiskManagementAgent:
         entry = candles[-1].close
         atr = max(technicals.indicators.atr, technicals.indicators.average_range, entry * 0.0005)
         if direction == SignalDirection.BUY:
-            structural_stop = liquidity.nearest_sell_side or technicals.support
+            structural_stop = liquidity.nearest_sell_side if liquidity else technicals.support
+            structural_stop = structural_stop or technicals.support
             stop_loss = min(entry - atr, structural_stop - atr * 0.15)
             take_profit = entry + max(request.min_rr * (entry - stop_loss), atr)
         else:
-            structural_stop = liquidity.nearest_buy_side or technicals.resistance
+            structural_stop = liquidity.nearest_buy_side if liquidity else technicals.resistance
+            structural_stop = structural_stop or technicals.resistance
             stop_loss = max(entry + atr, structural_stop + atr * 0.15)
             take_profit = entry - max(request.min_rr * (stop_loss - entry), atr)
 
         risk_per_unit = abs(entry - stop_loss)
         risk_amount = request.account_equity * request.risk_per_trade
         position_units = risk_amount / risk_per_unit if risk_per_unit else 0.0
+        lot_size = max(0.01, min(100.0, position_units / 100_000))
         reward = abs(take_profit - entry)
         risk_reward = reward / risk_per_unit if risk_per_unit else 0.0
 
@@ -351,11 +451,51 @@ class RiskManagementAgent:
             risk_reward=risk_reward,
             risk_amount=risk_amount,
             position_units=position_units,
+            lot_size=lot_size,
             invalidation=(
                 "Bullish setup invalidates below stop loss and failed reclaim of discount zone."
                 if direction == SignalDirection.BUY
                 else "Bearish setup invalidates above stop loss and failed rejection of premium zone."
             ),
+        )
+
+
+RiskManagementAgent = RiskManagerAgent
+
+
+class ExecutionAgent:
+    def execute(
+        self,
+        request: AnalyzeRequest,
+        debate: DebateReport,
+        risk_plan: RiskPlan | None,
+        candles: list[Candle],
+    ) -> ExecutionSignal:
+        entry = risk_plan.entry if risk_plan else candles[-1].close
+        if risk_plan:
+            stop_loss = risk_plan.stop_loss
+            take_profit = risk_plan.take_profit
+            lot_size = risk_plan.lot_size
+        else:
+            pip = 0.01 if request.symbol.endswith("JPY") else 0.0001
+            stop_loss = entry - 30 * pip
+            take_profit = entry + 70 * pip
+            lot_size = 0.0
+
+        direction = debate.direction
+        confidence = debate.confidence
+        if risk_plan is None and direction != SignalDirection.HOLD:
+            direction = SignalDirection.HOLD
+            confidence = min(confidence, 0.5)
+
+        return ExecutionSignal(
+            symbol=request.symbol,
+            direction=direction,
+            confidence=round(confidence, 4),
+            entry=round(entry, 5),
+            sl=round(stop_loss, 5),
+            tp=round(take_profit, 5),
+            lot_size=round(lot_size, 2),
         )
 
 

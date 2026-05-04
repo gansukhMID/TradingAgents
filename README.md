@@ -34,33 +34,43 @@ Forex:
 
 Returns service health metadata.
 
-### `POST /signals`
+### `POST /analyze`
 
 Request:
 
 ```json
 {
-  "pair": "EURUSD",
-  "timeframe": "1h",
-  "lookback": 160,
+  "symbol": "EURUSD",
   "account_equity": 10000,
   "risk_per_trade": 0.01,
-  "min_rr": 2.0
+  "min_rr": 2.0,
+  "lookback": 80
 }
 ```
 
-You may also pass a `candles` array with at least 50 OHLCV candles. If candles
-are omitted, the service uses the bundled deterministic Forex data adapter.
+You may also pass an `ohlc` array with at least 30 candles. If candles are
+omitted, the service uses bundled dummy Forex data so the full agent pipeline is
+runnable locally.
 
 Response includes:
 
-- `direction`: `buy`, `sell`, or `hold`
+- `symbol`
+- `direction`: `BUY`, `SELL`, or `HOLD`
 - `confidence`
-- `risk_plan`
-- `market_structure`
-- `liquidity`
-- `technicals`
-- `rationale`
+- `entry`
+- `sl`
+- `tp`
+- `lot_size`
+
+The LangGraph pipeline is:
+
+```text
+MarketStructureAgent -> TechnicalAgent -> SentimentAgent -> DebateAgent ->
+RiskManagerAgent -> ExecutionAgent
+```
+
+The older `POST /signals` route remains available as a compatibility wrapper for
+the richer diagnostic signal response.
 
 ## Run locally
 
@@ -78,6 +88,12 @@ forex-signal-engine
 ```
 
 Open API docs at `http://localhost:8000/docs`.
+
+Call the running service with the included script:
+
+```bash
+python scripts/test_analyze.py
+```
 
 ## Docker
 

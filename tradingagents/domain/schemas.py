@@ -8,9 +8,9 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class SignalDirection(str, Enum):
-    BUY = "buy"
-    SELL = "sell"
-    HOLD = "hold"
+    BUY = "BUY"
+    SELL = "SELL"
+    HOLD = "HOLD"
 
 
 class MarketBias(str, Enum):
@@ -70,6 +70,34 @@ class ForexSignalRequest(BaseModel):
     def require_enough_candles(cls, value: list[Candle] | None) -> list[Candle] | None:
         if value is not None and len(value) < 50:
             raise ValueError("at least 50 candles are required for analysis")
+        return value
+
+
+class AnalyzeRequest(BaseModel):
+    symbol: str = Field(default="EURUSD", examples=["EURUSD"])
+    timeframe: Timeframe = Timeframe.H1
+    ohlc: list[Candle] | None = Field(
+        default=None,
+        description="Optional OHLCV candles. Dummy EURUSD-style candles are generated when omitted.",
+    )
+    lookback: int = Field(default=80, ge=30, le=1000)
+    account_equity: float = Field(default=10_000.0, gt=0)
+    risk_per_trade: float = Field(default=0.01, gt=0, le=0.05)
+    min_rr: float = Field(default=2.0, ge=1.0, le=10.0)
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        normalized = value.replace("/", "").replace("-", "").upper().strip()
+        if len(normalized) != 6 or not normalized.isalpha():
+            raise ValueError("symbol must be a six-letter forex symbol such as EURUSD")
+        return normalized
+
+    @field_validator("ohlc")
+    @classmethod
+    def require_usable_ohlc(cls, value: list[Candle] | None) -> list[Candle] | None:
+        if value is not None and len(value) < 30:
+            raise ValueError("at least 30 OHLC candles are required when data is supplied")
         return value
 
 
@@ -154,6 +182,22 @@ class TechnicalReport(BaseModel):
     narrative: str
 
 
+class SentimentReport(BaseModel):
+    score: float = Field(ge=-1, le=1)
+    bias: MarketBias
+    drivers: list[str]
+    narrative: str
+
+
+class DebateReport(BaseModel):
+    direction: SignalDirection
+    confidence: float = Field(ge=0, le=1)
+    bias: MarketBias
+    bullish_score: float = Field(ge=0, le=1)
+    bearish_score: float = Field(ge=0, le=1)
+    rationale: list[str]
+
+
 class RiskPlan(BaseModel):
     entry: float
     stop_loss: float
@@ -161,7 +205,18 @@ class RiskPlan(BaseModel):
     risk_reward: float
     risk_amount: float
     position_units: float
+    lot_size: float = 0.0
     invalidation: str
+
+
+class ExecutionSignal(BaseModel):
+    symbol: str
+    direction: SignalDirection
+    confidence: float = Field(ge=0, le=1)
+    entry: float
+    sl: float
+    tp: float
+    lot_size: float
 
 
 class ForexSignal(BaseModel):
@@ -173,8 +228,11 @@ class ForexSignal(BaseModel):
     risk_plan: RiskPlan | None
     rationale: list[str]
     market_structure: MarketStructureReport
-    liquidity: LiquidityReport
+    liquidity: LiquidityReport | None = None
     technicals: TechnicalReport
+    sentiment: SentimentReport | None = None
+    debate: DebateReport | None = None
+    execution: ExecutionSignal | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
