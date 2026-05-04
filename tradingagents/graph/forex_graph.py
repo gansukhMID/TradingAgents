@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -30,6 +31,8 @@ from tradingagents.domain.schemas import (
     TechnicalReport,
 )
 from tradingagents.services.data import ForexDataService
+
+logger = logging.getLogger(__name__)
 
 
 class ForexGraphState(TypedDict, total=False):
@@ -74,6 +77,13 @@ class ForexSignalGraph:
     def analyze_execution(self, request: AnalyzeRequest) -> ExecutionSignal:
         state = self.analyze_graph.invoke({"analyze_request": request})
         return state["execution"]
+
+    def _log_agent_output(self, agent_name: str, output: Any) -> None:
+        if hasattr(output, "model_dump"):
+            payload = output.model_dump(mode="json")
+        else:
+            payload = output
+        logger.info("%s output: %s", agent_name, payload)
 
     def _build_signal_workflow(self) -> StateGraph:
         workflow = StateGraph(ForexGraphState)
@@ -122,6 +132,15 @@ class ForexSignalGraph:
             request.timeframe,
             request.lookback,
         )
+        logger.info(
+            "DataLoader output: %s",
+            {
+                "symbol": request.pair,
+                "timeframe": request.timeframe.value,
+                "candles": len(candles),
+                "source": "request" if request.candles else "data_service",
+            },
+        )
         return {"candles": candles[-request.lookback :]}
 
     def _load_analyze_candles(self, state: ForexGraphState) -> dict[str, Any]:
@@ -131,6 +150,15 @@ class ForexSignalGraph:
             request.timeframe,
             request.lookback,
         )
+        logger.info(
+            "DataLoader output: %s",
+            {
+                "symbol": request.symbol,
+                "timeframe": request.timeframe.value,
+                "candles": len(candles),
+                "source": "request" if request.ohlc else "data_service",
+            },
+        )
         return {
             "candles": candles[-request.lookback :],
             "analyze_request": request.model_copy(
@@ -139,56 +167,60 @@ class ForexSignalGraph:
         }
 
     def _market_structure(self, state: ForexGraphState) -> dict[str, Any]:
-        return {"market_structure": self.market_structure_agent.analyze(state["candles"])}
-
-    def _liquidity(self, state: ForexGraphState) -> dict[str, Any]:
-        return {
-            "liquidity": self.liquidity_agent.analyze(
-                state["candles"],
-                state["market_structure"],
-            )
-        }
+        report = self.market_structure_agent.analyze(state["candles"])
+        self._log_agent_output("MarketStructureAgent", report)
+        return {"market_structure": report}
 
     def _technicals(self, state: ForexGraphState) -> dict[str, Any]:
-        return {"technicals": self.technical_agent.analyze(state["candles"])}
+        report = self.technical_agent.analyze(state["candles"])
+        self._log_agent_output("TechnicalAgent", report)
+        return {"technicals": report}
 
     def _sentiment(self, state: ForexGraphState) -> dict[str, Any]:
-        return {
-            "sentiment": self.sentiment_agent.analyze(
-                state["analyze_request"],
-                state["market_structure"],
-                state["technicals"],
-            )
-        }
+        report = self.sentiment_agent.analyze(
+            state["analyze_request"],
+            state["market_structure"],
+            state["technicals"],
+        )
+        self._log_agent_output("SentimentAgent", report)
+        return {"sentiment": report}
 
     def _debate(self, state: ForexGraphState) -> dict[str, Any]:
-        return {
-            "debate": self.debate_agent.analyze(
-                state["market_structure"],
-                state["technicals"],
-                state["sentiment"],
-            )
-        }
+        report = self.debate_agent.analyze(
+            state["market_structure"],
+            state["technicals"],
+            state["sentiment"],
+        )
+        self._log_agent_output("DebateAgent", report)
+        return {"debate": report}
 
     def _risk_manager(self, state: ForexGraphState) -> dict[str, Any]:
-        return {
-            "risk_plan": self.risk_agent.plan(
-                state["analyze_request"],
-                state["debate"].direction,
-                state["candles"],
-                state["technicals"],
-            )
-        }
+        report = self.risk_agent.plan(
+            state["analyze_request"],
+            state["debate"].direction,
+            state["candles"],
+            state["technicals"],
+        )
+        self._log_agent_output("RiskManagerAgent", report)
+        return {"risk_plan": report}
 
     def _execution(self, state: ForexGraphState) -> dict[str, Any]:
-        return {
-            "execution": self.execution_agent.execute(
-                state["analyze_request"],
-                state["debate"],
-                state["risk_plan"],
-                state["candles"],
-            )
-        }
+        report = self.execution_agent.execute(
+            state["analyze_request"],
+            state["debate"],
+            state["risk_plan"],
+            state["candles"],
+        )
+        self._log_agent_output("ExecutionAgent", report)
+        return {"execution": report}
+
+    def _liquidity(self, state: ForexGraphState) -> dict[str, Any]:
+        report = self.liquidity_agent.analyze(
+            state["candles"],
+            state["market_structure"],
+        )
+        self._log_agent_output("LiquidityAgent", report)
+        return {"liquidity": report}
 
     def _directional_confluence(self, state: ForexGraphState) -> dict[str, Any]:
         direction, bias, confidence = self.synthesis_agent.decide_direction(
@@ -196,6 +228,12 @@ class ForexSignalGraph:
             state["liquidity"],
             state["technicals"],
         )
+        output = {
+            "direction": direction.value,
+            "bias": bias.value,
+            "confidence": confidence,
+        }
+        logger.info("DirectionalConfluence output: %s", output)
         return {
             "candidate_direction": direction,
             "candidate_bias": bias,
@@ -203,23 +241,23 @@ class ForexSignalGraph:
         }
 
     def _risk_management(self, state: ForexGraphState) -> dict[str, Any]:
-        return {
-            "risk_plan": self.risk_agent.plan(
-                state["request"],
-                state["candidate_direction"],
-                state["candles"],
-                state["technicals"],
-                state["liquidity"],
-            )
-        }
+        report = self.risk_agent.plan(
+            state["request"],
+            state["candidate_direction"],
+            state["candles"],
+            state["technicals"],
+            state["liquidity"],
+        )
+        self._log_agent_output("RiskManagerAgent", report)
+        return {"risk_plan": report}
 
     def _signal_synthesis(self, state: ForexGraphState) -> dict[str, Any]:
-        return {
-            "signal": self.synthesis_agent.synthesize(
-                state["request"],
-                state["market_structure"],
-                state["liquidity"],
-                state["technicals"],
-                state["risk_plan"],
-            )
-        }
+        report = self.synthesis_agent.synthesize(
+            state["request"],
+            state["market_structure"],
+            state["liquidity"],
+            state["technicals"],
+            state["risk_plan"],
+        )
+        self._log_agent_output("SignalSynthesisAgent", report)
+        return {"signal": report}

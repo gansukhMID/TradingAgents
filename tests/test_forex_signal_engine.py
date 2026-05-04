@@ -9,6 +9,7 @@ from tradingagents.agents import MarketStructureAgent
 from tradingagents.domain.schemas import AnalyzeRequest, Candle, ForexSignalRequest, SignalDirection
 from tradingagents.graph import ForexSignalGraph
 from tradingagents.services.data import ForexDataService
+from scripts.test_analyze import call_local
 
 
 def _candles(count: int = 80) -> list[dict]:
@@ -83,6 +84,25 @@ def test_analyze_endpoint_returns_execution_json() -> None:
     assert payload["direction"] in {"BUY", "SELL", "HOLD"}
     assert 0 <= payload["confidence"] <= 1
     assert payload["entry"] > 0
+
+
+def test_analyze_script_can_call_endpoint_multiple_times(caplog) -> None:
+    caplog.set_level("INFO")
+    payload = {
+        "symbol": "EURUSD",
+        "ohlc": _candles(200),
+        "account_equity": 10_000,
+        "risk_per_trade": 0.01,
+        "min_rr": 2.0,
+    }
+
+    first = call_local(payload)
+    second = call_local(payload)
+
+    assert first["symbol"] == "EURUSD"
+    assert second["symbol"] == "EURUSD"
+    assert "MarketStructureAgent output" in caplog.text
+    assert "ExecutionAgent output" in caplog.text
 
 
 def test_analyze_graph_uses_dummy_data_when_ohlc_missing() -> None:
